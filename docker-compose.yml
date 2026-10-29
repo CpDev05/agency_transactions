@@ -1,0 +1,62 @@
+name: agency-transactions
+
+services:
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    volumes:
+      # Volumen existente del contenedor agency-transactions (datos reales).
+      # Declarado external: Compose no lo crea ni lo elimina nunca.
+      - mongo_data:/data/db
+    networks:
+      - agency_net
+    # Necesario para que el backend local de Windows siga usando
+    # mongodb://127.0.0.1:27017/agency_transactions. Solo loopback.
+    ports:
+      - '127.0.0.1:${MONGO_PORT:-27017}:27017'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'mongosh',
+          '--quiet',
+          '--eval',
+          "quit(db.adminCommand({ ping: 1 }).ok ? 0 : 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  backend:
+    build:
+      context: ./backend
+    image: agency-transactions-backend:local
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    depends_on:
+      mongo:
+        condition: service_healthy
+    # Secretos y configuración local (JWT, CORS, etc.). Nunca se versiona.
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: '4000'
+      HOST: '0.0.0.0'
+      # Nombre del servicio dentro de la red de Compose (no localhost)
+      MONGODB_URI: mongodb://mongo:27017/agency_transactions
+    ports:
+      - '${BACKEND_PORT:-4000}:4000'
+    networks:
+      - agency_net
+
+networks:
+  agency_net:
+    driver: bridge
+
+volumes:
+  mongo_data:
+    external: true
+    name: agency_transactions-mongo-data
